@@ -4,10 +4,13 @@ import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 
 #define size of video frame.
-W = 1280
-H = 720
-left_bottom, right_bottom 	= [W*0.1, H], [W*0.9, H]
-left_top, right_top			= [W*0.196, H*0.35], [W*0.7, H*0.35]
+W = 960
+H = 540
+left_bottom = [W*0.1, H]
+right_bottom = [W*0.9, H]
+left_top = [W*0.2, H*0.6]
+right_top = [W*0.7, H*0.6]
+
 
 #only detect on white and yellow color, other colors will be got rid of.
 def filter_white_yellow(image):
@@ -42,8 +45,8 @@ def BoudingLineValidation(line1, line2):
 
 def LaneMagicEngine(image, lines_list):
     if len(lines_list) < 1:
-        # print("Data were not enough to compute")
-        return -1, 0
+        # print("Lines were not enough to compute")
+        return -1;
     height, width, _ = image.shape
     roi_height = height * 0.9 - right_top[1] * 1.2
     angular_list = []
@@ -54,11 +57,18 @@ def LaneMagicEngine(image, lines_list):
     if len(angular_list) == 1: # when HougLine detects one line only
         lane_height = max(lines_list[0][1], lines_list[0][3]) - min(lines_list[0][1], lines_list[0][3])
         if lane_height / roi_height < 0.4:
+            #draw for fun
             l = lines_list[0]
-            return True, 0
-    cl_num = 1
-    std_dev = np.std(a) 
-    if std_dev >= 4 and std_dev < 6: 
+            if angular_list[0] > 0:
+                cv2.line(image, (l[0], l[1]), (l[2], l[3]), [0, 11, 135], 2, cv2.LINE_AA)
+            else:
+                cv2.line(image, (l[0], l[1]), (l[2], l[3]), [0, 125, 223], 2, cv2.LINE_AA)
+            return True
+
+    # So sensitive to do in this way
+    cl_num = 1  # cluster number
+    std_dev = np.std(a)  # standard deviation
+    if std_dev >= 4 and std_dev < 6:  # about two clusters
         cl_num = 2
     elif std_dev >= 6:
         cl_num = 3
@@ -68,23 +78,30 @@ def LaneMagicEngine(image, lines_list):
         cluster.fit_predict(a)
     except:
         print("Could not cluster")
-        return -1, 0
+        return -1
+
     x1, y1, x2, y2 = 0, 0, 0, 0
     if angular_list[0] > 0:
-        x1, y1 = right_top[0], right_top[1]
-        x2, y2  = right_bottom[0], right_bottom[1]
+        x1 = right_top[0]
+        y1 = right_top[1]
+        x2 = right_bottom[0]
+        y2 = right_bottom[1]
     else:
-        x1, y1 = left_top[0], left_top[1]
-        x2, y2  = left_bottom[0], left_bottom[1]
-
+        x1 = left_top[0]
+        y1 = left_top[1]
+        x2 = left_bottom[0]
+        y2 = left_bottom[1]
     # this code to calculate average of distance, slope of each group
-	# allocation must be critical
-    dist_list, coords, means_list  = [None] * cl_num, [None] * cl_num, [None] * cl_num
+    dist_list = [None] * cl_num
+    coords = [None] * cl_num
+    means_list = [None] * cl_num
     groups_line = [[], [], []]
     mydict = {i: np.where(cluster.labels_ == i)[0] for i in range(cl_num)}
     for i in range(len(mydict)):
         y_min = height
-        y_max, sum, sum_dist = 0,0,0
+        y_max = 0
+        sum = 0
+        sum_dist = 0
         for ix in mydict[i]:
             l = lines_list[ix]
             groups_line[i].append(l)
@@ -93,23 +110,32 @@ def LaneMagicEngine(image, lines_list):
             agl = np.rad2deg(np.arctan2(l[3] - l[1], l[2] - l[0]))
             sum += abs(agl)
             # compute distance
-            x0, y0 = (l[0] + l[2]) / 2, (l[1] + l[3]) / 2
+            x0 = (l[0] + l[2]) / 2
+            y0 = (l[1] + l[3]) / 2
             dist = abs((x2 - x1) * (y1 - y0) - (x1 - x0) * (y2 - y1)) / np.sqrt(np.square(x2 - x1) + np.square(y2 - y1))
             sum_dist += dist
         means_list[i] = sum / len(mydict[i])
         coords[i] = [y_max, y_min]
         dist_list[i] = sum_dist / len(mydict[i])
     # select group with highest slope average
+    cl_index = 0
     max_value = max(means_list)
-    cl_index  = means_list.index(max_value)
-    dist_min_value  = min(dist_list)
-    dist_index      = dist_list.index(dist_min_value)
+    cl_index = means_list.index(max_value)
+
+    dist_index = 0
+    dist_min_value = min(dist_list)
+    dist_index = dist_list.index(dist_min_value)
+
+
+    # combine with second condition
     if dist_index == cl_index and len(mydict) != 1:
         if cl_num > 2 :
             means_list.pop(cl_index)
             groups_line.pop(cl_index)
             max_value = max(means_list)
-            cl_index  = means_list.index(max_value)
+            cl_index = means_list.index(max_value)
+
+    # TODO detect white gap, If white gap exists(True), it should be dash lane
     RIGHT_COLOR = [120, 18, 254]
     LEFT_COLOR = [253, 108, 46]
     for l in groups_line[cl_index]:
@@ -118,40 +144,38 @@ def LaneMagicEngine(image, lines_list):
         else:
             cv2.line(image, (l[0], l[1]), (l[2], l[3]), RIGHT_COLOR, 2, cv2.LINE_AA)
 
+    # we move to last step to determine dash or solid lane
     final_gap = False
     lane_height = abs(coords[cl_index][1] - coords[cl_index][0])
     roi_bound = right_top[1] * 1.2
-    first_gap = False
-    base_line = None
 
-    min_pos = min(coords[cl_index][1], coords[cl_index][0])
-    max_pos = max(coords[cl_index][1], coords[cl_index][0])
+    # print("ROI_Bound",right_top[1] * 1.2)
+
     if lane_height / roi_height > 0.5:
         # do window sliding
         min_line = 10
+        min_pos = min(coords[cl_index][1] , coords[cl_index][0])
+        sliding_boundary = roi_bound if roi_bound / min_pos < 0.18 else roi_bound
+
+        max_pos = max(coords[cl_index][1] , coords[cl_index][0])
         sliding_start = max_pos if max_pos/height > 0.8 else  int(height*0.9 - 5)
         curP = sliding_start
-        sliding_boundary = roi_bound if roi_bound / min_pos < 0.18 else roi_bound
-        gap_count = 0
         while curP > int(sliding_boundary):
             sliding = [curP, curP - min_line]
             step_gap = False
             for l in groups_line[cl_index]:
                 if BoudingLineValidation(l, sliding) == 1:
-                    if first_gap == False:
-                        base_line = l
-                        first_gap = True
+                    # if step_gap == False:
+                        # print("Gap", curP)
                     step_gap = True
+
             if step_gap is False:
                 final_gap = True
-                gap_count += 1
-            curP -= 5
+                # print("Dash", curP)
 
-        if gap_count < 10:
-            final_gap = False
+            curP -= 5
     else:
         final_gap = True
-        
     return final_gap
 
 def OnStepProcessing(image):
@@ -238,15 +262,23 @@ def OnStepProcessing(image):
 
 def main():
     video = cv2.VideoCapture("input.mp4") # place you file path here to process
+    frame_width = int(video.get(3))
+    frame_height = int(video.get(4))
+    fps = int(video.get(5))
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter("hough_video.avi", fourcc, 25, (frame_width, frame_height))
+    total_length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     while True:
         ret, image = video.read()
         if ret is False:
             break
         OnStepProcessing(image)
+        out.write(image)
         key = cv2.waitKey(25)
         if key == 27:
             break
     video.release()
+    out.release()
 
 if __name__ == "__main__":
 
