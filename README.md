@@ -8,7 +8,7 @@ The purpose of this program is to determine position of car on the road. Positio
 - Determine region of interest to remove redundant data
 - Do detection on edge using CannyEdge detector
 - Do line segmentation using HougLineP algorithm. Compared to traditional HoughLine. HougLine with probability is better
-- Check wheter lane is either solid or dash lane at each side of the car.
+- Check wheter lane is either solid or dash lane at each side of the car. Using clustering method combined with standard deviation 
 - Based on type of lane(Dash, Solid), You're able to distinguish LEFT, RIGHT, MIDDLE
 
 <br />This program was written in Python language. To run this program, some python packages are required such as opencv, sklearn. numpy.
